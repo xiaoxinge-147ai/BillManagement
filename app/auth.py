@@ -54,7 +54,7 @@ DANGEROUS_MODULES = {
 }
 
 ADMIN_ONLY_PREFIXES = ["/users"]          # 账号管理，仅超管
-PUBLIC_PATHS = {"/login", "/logout", "/favicon.ico"}
+PUBLIC_PATHS = {"/login", "/logout", "/favicon.ico", "/health"}
 # 登录即可访问，不受模块授权限制（个人设置）
 SELF_PREFIXES = ["/me"]
 

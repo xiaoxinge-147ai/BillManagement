@@ -1,3 +1,8 @@
+# 显式指定项目名：compose 默认用「目录名」当项目名，一旦目录被重命名，
+# 它会当成新项目、去挂一个全新的空 pgdata 卷 —— 看起来就像数据库丢了。
+# 写死名字就不会因为这个原因踩坑。
+name: billmanagement
+
 services:
   db:
     image: postgres:16-alpine

@@ -133,6 +133,16 @@ async def _auth_mw(request: Request, call_next):
     return await call_next(request)
 
 
+@app.get("/health")
+def health():
+    """健康检查：部署脚本用它判断服务是否起来；放在 PUBLIC_PATHS 里，免登录。
+
+    不查数据库 —— 只回答「进程在、路由通了」。容器刚启动时数据库可能还在初始化，
+    那时探库会误报不健康，反而让部署脚本白等。
+    """
+    return {"ok": True}
+
+
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, err: Optional[int] = None, next: str = "/"):
     return templates.TemplateResponse(
