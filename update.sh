@@ -47,8 +47,28 @@ die()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 step "检查运行环境"
 
 command -v git >/dev/null 2>&1 || die "没装 git"
-git rev-parse --git-dir >/dev/null 2>&1 || \
-  die "当前目录不是 git 仓库。请按部署说明把服务器目录转成 git 仓库（见 README「服务器部署」）"
+
+# 探一次仓库可用性。注意要把「不是仓库」和「属主不一致」分开报 ——
+# git 2.35.2+ 的 safe.directory 检查在属主不符时也会让 rev-parse 失败，
+# 一律报成「不是 git 仓库」会把排查方向带偏（面板上传的目录属主常是 www，
+# 而 SSH 登录是 root，就会撞上）。
+GITERR=$(git rev-parse --git-dir 2>&1 >/dev/null) || {
+  if printf '%s' "$GITERR" | grep -q "dubious ownership"; then
+    # 路径直接从 git 的报错里抠出来 —— 必须和 git 认定的那个路径一字不差，
+    # 用 pwd -P 会解析软链，目录是软链时加白会失效。抠不到才退回 pwd。
+    HERE=$(printf '%s' "$GITERR" | sed -n "s/.*repository at '\(.*\)'.*/\1/p" | head -1)
+    [ -n "$HERE" ] || HERE=$(pwd -P)
+    warn "git 拒绝操作此目录：目录属主与当前用户（$(id -un)）不一致。"
+    echo "  这是 git 的安全检查 safe.directory，不是权限损坏。加白后重试即可："
+    echo
+    echo "      git config --global --add safe.directory $HERE"
+    echo
+    echo "  若脚本会由多个用户/cron 执行，改用对所有用户生效的："
+    echo "      git config --system --add safe.directory $HERE"
+    die "加白后重新执行本脚本"
+  fi
+  die "当前目录不是 git 仓库（$GITERR）。请按 README「服务器部署」把目录转成 git 仓库"
+}
 
 DOCKER=""
 if docker compose version >/dev/null 2>&1; then
