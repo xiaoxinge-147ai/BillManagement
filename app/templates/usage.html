@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% set nav = 'usage' %}
+{% block body %}
+<h2>渠道消耗</h2>
+<div class="desc">默认直接读取已保存的本地快照（切换 tab / 选日期很快）。点「查询并保存」才会回源库重新拉取当天数据并落库。</div>
+
+<div class="card">
+  <div class="row">
+    <form method="get" action="/usage" class="row" style="margin:0">
+      <input type="hidden" name="refresh" value="1">
+      <div>
+        <label>站点</label>
+        <select name="site_id">
+          {% for s in sites %}
+          <option value="{{ s.id }}" {{ 'selected' if site and s.id==site.id else '' }}>{{ s.id }} - {{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn" type="submit">查询并保存（重新拉取）</button>
+    </form>
+  </div>
+  {% if saved is not none %}
+  <div class="tag green" style="margin-top:10px; display:inline-block">✓ 已重新拉取并保存 {{ saved }} 条到数据库</div>
+  {% elif saved_count %}
+  <div class="muted" style="margin-top:10px; font-size:13px">当前为本地快照（{{ saved_count }} 条）。如需最新数据点「查询并保存」。</div>
+  {% endif %}
+</div>
+
+{% if error %}
+<div class="err">查询失败：{{ error }}</div>
+{% endif %}
+
+{% if site %}
+<div class="card">
+  <div style="margin-bottom:10px">
+    <b>{{ site.name }}</b> · {{ d }} ·
+    合计消耗量 <b class="num">{{ '{:,.4f}'.format(total_units) }}</b> ·
+    合计调用 <b class="num">{{ '{:,}'.format(total_calls) }}</b> 次
+  </div>
+  <table>
+    <thead><tr><th>渠道ID</th><th>渠道名</th><th>模型</th><th style="text-align:right">消耗量(平台单位)</th><th style="text-align:right">调用次数</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.channel_id }}</td>
+        <td>{{ r.channel_name }}</td>
+        <td>{{ r.model_name }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.units) }}</td>
+        <td class="num" style="text-align:right">{{ '{:,}'.format(r.calls) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="muted" style="text-align:center; padding:24px">该日无消耗数据（或连接未配置）。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card muted">请先在「站点」页配置一个总站连接。</div>
+{% endif %}
+{% endblock %}

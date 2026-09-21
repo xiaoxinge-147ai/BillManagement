@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="card">
+  {% if ok %}
+  <div class="tag green" style="font-size:14px">✓ {{ msg }}</div>
+  {% else %}
+  <div class="err">{{ msg }}</div>
+  {% endif %}
+  <div style="margin-top:16px"><a class="btn sec" href="{{ back }}">返回</a></div>
+</div>
+{% endblock %}

@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% set nav = 'scripts' %}
+{% block body %}
+<h2>导出脚本</h2>
+<div class="desc">
+  账单的<b>表格长相</b>由脚本决定：把算好的数据写成 Excel 的那一段。
+  下载默认脚本 → 改 → 传回来 → 绑定给某个客户，那个客户的账单就按你的模板出。
+  <b>没有绑定的客户用系统默认脚本</b>。<br>
+  金额怎么算（读源库、拆 token、按 new-api 计费公式重算）不在脚本里，所有客户口径一致，改脚本不会把账算错。
+</div>
+
+{% if blocked %}
+<div class="card" style="border-color:#fecaca; background:#fffbfb">
+  <div style="font-weight:600; color:#b91c1c; margin-bottom:8px">功能未开放</div>
+  <div style="font-size:13.5px; line-height:1.7">
+    {{ blocked }}<br><br>
+    在 <code>.env</code> 里设置 <code>APP_PASSWORD=你的密码</code> 后重启服务即可启用。
+    未设密码时任何人都能访问本页面，而脚本会在服务器上执行代码 —— 所以这里直接关闭。
+  </div>
+</div>
+{% else %}
+
+<div class="card" style="border-color:#fecaca; background:#fffbfb">
+  <div style="font-weight:600; color:#b91c1c; margin-bottom:6px">⚠️ 安全提示</div>
+  <div class="muted" style="font-size:13px">
+    上传的脚本会在<b>本服务进程内执行</b>，等同于把服务器代码权限交给上传者。
+    请只对可信人员开放本页面，并务必设置 <code>APP_PASSWORD</code>。
+  </div>
+</div>
+
+{% if msg %}<div class="card" style="padding:10px 14px"><span class="tag green">{{ msg }}</span></div>{% endif %}
+{% if err and not keep %}<div class="card" style="padding:10px 14px"><span class="err">{{ err }}</span></div>{% endif %}
+
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:14px">
+    <div style="font-weight:600">脚本列表</div>
+    <a class="btn sec" style="text-decoration:none" download data-noload href="/scripts/download?sid=0">
+      下载默认脚本
+    </a>
+  </div>
+  <div style="overflow-x:auto">
+    <table class="compact" style="min-width:760px">
+      <thead>
+        <tr><th style="width:60px">ID</th><th>名称</th><th>备注</th><th>更新时间</th>
+            <th>已绑定</th><th style="width:190px">操作</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="muted">—</td>
+          <td><b>{{ builtin }}</b>
+            {% if builtin_replaced %}<span class="tag" style="background:#fef3c7; color:#92400e">已替换</span>
+            {% else %}<span class="tag blue">内置</span>{% endif %}
+          </td>
+          <td class="muted">
+            {% if builtin_replaced %}已被管理员替换，可恢复出厂{% else %}当前线上正在跑的那份，可下载后改{% endif %}
+          </td>
+          <td class="muted">{{ '自定义' if builtin_replaced else '随程序发布' }}</td>
+          <td class="muted">未绑定的客户默认用它</td>
+          <td>
+            <div style="display:flex; gap:6px; flex-wrap:wrap">
+              <a class="btn sec" style="text-decoration:none" download data-noload
+                 href="/scripts/download?sid=0">下载</a>
+              <button type="button" class="btn sec" onclick="toggleBuiltin()">替换</button>
+              {% if builtin_replaced %}
+              <form method="post" action="/scripts/builtin"
+                    onsubmit="return confirmRestore(this)">
+                <input type="hidden" name="restore" value="1">
+                <input type="hidden" name="confirm" value="">
+                <button class="btn danger" type="submit">恢复出厂</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        <tr id="builtinrow" style="display:none">
+          <td colspan="6" style="padding:0">
+            <form method="post" action="/scripts/builtin" enctype="multipart/form-data"
+                  style="padding:14px 12px; background:#f8fafc">
+              {% if err and keep and keep.scope == 'builtin' %}
+              <div class="err" id="saveerr" style="margin-bottom:12px">{{ err }}<br>
+                <span style="font-weight:400">下方内容已保留，改完密码直接再提交即可。</span></div>
+              {% endif %}
+              <div class="err" style="margin-bottom:12px">
+                替换「{{ builtin }}」会影响<b>所有未单独绑定脚本的客户</b>。
+                内容必须实现 <code>{{ entry }}</code>，保存前会先编译校验，编译不过不会生效。
+              </div>
+              <div class="row" style="margin-bottom:10px">
+                <div><label>上传 .py 文件（与下方内容二选一）</label>
+                  <input type="file" name="file" accept=".py"></div>
+                <div><label>你的登录密码</label>
+                  <input type="password" name="confirm" autocomplete="current-password"
+                         placeholder="当前账号的密码" style="width:180px"></div>
+              </div>
+              <label>脚本内容（已填入当前生效的那份，可直接改）</label>
+              <textarea name="content" rows="16" spellcheck="false"
+                        style="width:100%; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px"
+                        >{{ builtin_src }}</textarea>
+              <div style="margin-top:12px; display:flex; gap:8px">
+                <button class="btn" type="submit">替换系统默认脚本</button>
+                <button type="button" class="btn sec" onclick="toggleBuiltin()">取消</button>
+              </div>
+            </form>
+          </td>
+        </tr>
+        {% for s in scripts %}
+        <tr>
+          <td class="muted">{{ s.id }}</td>
+          <td><b>{{ s.name }}</b></td>
+          <td class="muted">{{ s.note or '' }}</td>
+          <td class="muted">{{ s.updated_at.strftime('%Y-%m-%d %H:%M') if s.updated_at else '—' }}</td>
+          <td class="muted" style="font-size:12px">
+            {% if used.get(s.id) %}{{ used[s.id] | join('、') }}{% else %}<span class="muted">未绑定</span>{% endif %}
+          </td>
+          <td>
+            <div style="display:flex; gap:6px">
+              <a class="btn sec" style="text-decoration:none" download data-noload
+                 href="/scripts/download?sid={{ s.id }}">下载</a>
+              <a class="btn sec" style="text-decoration:none" href="/scripts?edit={{ s.id }}">编辑</a>
+              <form method="post" action="/scripts/delete" style="margin:0"
+                    onsubmit="var p=prompt('删除脚本「{{ s.name }}」？绑定它的客户会回落到默认脚本。\n请输入你的登录密码确认：');
+                              if(p===null) return false; this.confirm.value=p; return true;">
+                <input type="hidden" name="sid" value="{{ s.id }}">
+                <input type="hidden" name="confirm" value="">
+                <button class="btn danger" type="submit">删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <div style="font-weight:600; margin-bottom:4px">
+    {% if edit %}编辑脚本「{{ edit.name }}」{% else %}新增脚本{% endif %}
+  </div>
+  <div class="muted" style="font-size:12px; margin-bottom:14px">
+    必须包含入口函数
+    <code>{{ entry }}(path, cols, summary_rows, daily_rows, detail, pricing, stats, qpu)</code>，
+    返回 <code>{sheet名: 被截断行数}</code>。保存前会自动校验语法与签名，不通过不会落库。
+    最省事的做法：先「下载默认脚本」，在它基础上改。
+  </div>
+  {% if err and keep and keep.scope == 'script' %}
+  <div class="err" id="saveerr" style="margin-bottom:12px">{{ err }}<br>
+    <span style="font-weight:400">下方内容已保留，改完密码直接再提交即可。</span></div>
+  {% endif %}
+  <form method="post" action="/scripts/save" enctype="multipart/form-data">
+    <input type="hidden" name="sid" value="{{ keep.sid if keep and keep.scope == 'script' else (edit.id if edit else 0) }}">
+    <div class="row" style="margin-bottom:12px">
+      <div>
+        <label>脚本名</label>
+        <input name="name" value="{{ keep.name if keep and keep.scope == 'script' else (edit.name if edit else '') }}"
+               required style="width:220px">
+      </div>
+      <div style="flex:1; min-width:240px">
+        <label>备注</label>
+        <input name="note" value="{{ keep.note if keep and keep.scope == 'script' else (edit.note if edit else '') }}"
+               style="width:100%">
+      </div>
+      <div>
+        <label>上传 .py 覆盖下方内容</label>
+        <input type="file" name="file" accept=".py,text/x-python">
+      </div>
+    </div>
+    <label>脚本内容</label>
+    <textarea name="content" rows="18" spellcheck="false"
+      style="width:100%; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+             font-size:12.5px; line-height:1.55; white-space:pre; overflow-x:auto"
+      placeholder="粘贴脚本内容，或用上面的「上传 .py」">{{ keep.content if keep and keep.scope == 'script' else (edit.content if edit else '') }}</textarea>
+    <div class="row" style="margin-top:12px; align-items:flex-end">
+      <div>
+        <label>你的登录密码</label>
+        <input type="password" name="confirm" required autocomplete="current-password"
+               placeholder="当前账号的密码" style="width:190px">
+      </div>
+      <button class="btn" type="submit">{{ '保存修改' if edit else '新增脚本' }}</button>
+      {% if edit %}<a class="btn sec" style="text-decoration:none" href="/scripts">取消编辑</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div style="font-weight:600; margin-bottom:10px">变更审计</div>
+  <div style="overflow-x:auto">
+    <table class="compact" style="min-width:620px">
+      <thead><tr><th>时间</th><th>动作</th><th>脚本</th><th>大小</th><th>内容哈希</th><th>来源IP</th></tr></thead>
+      <tbody>
+        {% for a in audits %}
+        <tr>
+          <td class="muted">{{ a.at.strftime('%Y-%m-%d %H:%M:%S') if a.at else '' }}</td>
+          <td>{% if a.action == 'delete' %}<span class="tag" style="background:#fef2f2;color:#b91c1c">删除</span>
+              {% else %}<span class="tag blue">保存</span>{% endif %}</td>
+          <td>{{ a.script_name }}</td>
+          <td class="num muted">{{ '{:,}'.format(a.size) }} B</td>
+          <td class="muted" style="font-family:ui-monospace,monospace; font-size:11.5px">{{ (a.content_sha or '')[:16] }}</td>
+          <td class="muted">{{ a.ip or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="muted" style="text-align:center; padding:20px">还没有变更记录</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<script>
+  function toggleBuiltin(){
+    var r = document.getElementById('builtinrow');
+    if(r) r.style.display = (r.style.display === 'none') ? '' : 'none';
+  }
+  function confirmRestore(f){
+    var pw = prompt('恢复出厂会覆盖当前的自定义默认脚本。请输入你的登录密码确认：');
+    if(pw === null) return false;
+    f.confirm.value = pw;
+    return true;
+  }
+  // 提交失败后回到本页：展开对应表单、滚到错误处，内容都还在
+  (function(){
+    {% if err and keep and keep.scope == 'builtin' %}
+    var row = document.getElementById('builtinrow');
+    if(row) row.style.display = '';
+    {% endif %}
+    var e = document.getElementById('saveerr');
+    if(e) e.scrollIntoView({block:'center'});
+  })();
+</script>
+{% endblock %}

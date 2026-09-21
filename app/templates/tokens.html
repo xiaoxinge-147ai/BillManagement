@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% set nav = 'tokens' %}
+{% block body %}
+<h2>令牌成本</h2>
+<div class="desc">
+  把对账得到的 sk 实际成本，按渠道、再按令牌在渠道的消耗占比，摊到总站各令牌；并按分组汇总。
+  依赖：当天已「保存快照」且已在「对账」录入/读取 sk 实际成本。
+</div>
+
+<div class="card">
+  <form method="get" action="/tokens" class="row">
+    <div>
+      <label>站点</label>
+      <select name="site_id">
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if site and s.id==site.id else '' }}>{{ s.id }} - {{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">查询</button>
+  </form>
+</div>
+
+{% if not has_data %}
+<div class="card muted">该日（{{ d }}）没有令牌消耗数据。请先到「渠道消耗」保存当天快照。</div>
+{% else %}
+<div class="card">
+  <div style="margin-bottom:10px">{{ site.name }} · {{ d }} · <b>令牌成本合计 {{ '{:,.4f}'.format(total) }}</b></div>
+  <b style="font-size:13px">分组成本</b>
+  <table style="margin-top:6px">
+    <thead><tr><th>分组</th><th style="text-align:right">成本</th></tr></thead>
+    <tbody>
+      {% for g in groups %}
+      <tr><td><span class="tag blue">{{ g.group_name or '(无分组)' }}</span></td><td class="num" style="text-align:right"><b>{{ '{:,.4f}'.format(g.cost) }}</b></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <b style="font-size:13px">令牌成本明细</b>
+  <div style="overflow-x:auto; margin-top:6px">
+  <table class="compact" style="min-width:760px">
+    <thead><tr><th>令牌ID</th><th>令牌名</th><th>分组</th><th style="text-align:right">消耗(平台单位)</th><th style="text-align:right">令牌成本</th></tr></thead>
+    <tbody>
+      {% for t in tokens %}
+      <tr>
+        <td>{{ t.token_id }}</td>
+        <td>{{ t.token_name }}{% if not t.known %} <span class="tag" style="background:#fee2e2;color:#991b1b" title="该令牌部分渠道的 sk 尚未对账/读取，成本不完整">成本不全</span>{% endif %}</td>
+        <td class="muted">{{ t.group_name }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(t.units) }}</td>
+        <td class="num" style="text-align:right"><b>{{ '{:,.4f}'.format(t.cost) }}</b></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="muted" style="font-size:12px; margin-top:10px">"成本不全"=该令牌经过的某些渠道的 sk 还没在「对账」读到实际成本，那部分按 0 计。补齐对账后即准确。</div>
+</div>
+{% endif %}
+{% endblock %}

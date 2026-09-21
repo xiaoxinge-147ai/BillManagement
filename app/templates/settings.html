@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% set nav = 'settings' %}
+{% block body %}
+<h2>设置 · 定时任务</h2>
+<div class="desc">配置每天自动保存快照（并后台读取上游用量）的开关与执行时间。修改保存后立即生效，无需重启。</div>
+
+{% if msg %}<div class="tag green" style="margin-bottom:12px; display:inline-block">{{ msg }}</div>{% endif %}
+
+<div class="card" style="max-width:640px">
+  <form method="post" action="/settings">
+    <div style="margin-bottom:16px">
+      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; color:var(--fg)">
+        <input type="checkbox" name="enabled" value="1" style="width:auto" {{ 'checked' if enabled else '' }}>
+        启用每天自动保存
+      </label>
+    </div>
+
+    <div class="row" style="margin-bottom:16px">
+      <div>
+        <label>每天执行时间</label>
+        <input type="time" name="run_time" value="{{ run_time }}" step="60">
+        <div class="muted" style="font-size:12px; margin-top:4px">时区 {{ tz }}。统计的是「前一天」的数据。</div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:16px">
+      <label>高级：cron 表达式（可选，填了则覆盖上面的时间）</label>
+      <input name="cron_advanced" placeholder="如 0 2 * * *（分 时 日 月 周），或 6 段含秒" style="width:100%">
+      <div class="muted" style="font-size:12px; margin-top:4px">当前生效：<code>{{ cron }}</code></div>
+    </div>
+
+    <button class="btn" type="submit">保存并生效</button>
+  </form>
+
+  <div class="muted" style="font-size:13px; margin-top:16px; border-top:1px solid var(--bd); padding-top:12px">
+    下次执行：<b>{{ next_run or '未排程（已停用或保存后查看）' }}</b>
+  </div>
+</div>
+
+<div class="card" style="max-width:640px">
+  <b style="font-size:13px">自动保存做什么</b>
+  <ul class="muted" style="font-size:13px; line-height:1.8; margin:8px 0 0; padding-left:20px">
+    <li>遍历所有已配置连接的站点，保存「前一天」快照：总站存渠道消耗/令牌×渠道/令牌·渠道元信息；客户站存客户×分组×渠道消耗并同步分组倍率。</li>
+    <li>各总站再后台异步从上游读取各令牌当天实际消耗（供对账）。</li>
+    <li>覆盖式保存：重复执行不会重复累加。白天在「渠道消耗」「客户利润」页查询也会即时保存当天。</li>
+  </ul>
+</div>
+{% endblock %}

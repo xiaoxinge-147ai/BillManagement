@@ -1,0 +1,413 @@
+{% extends "base.html" %}
+{% set nav = 'export' %}
+{% block body %}
+<h2>客户账单导出</h2>
+<div class="desc">
+  按周期从客户站源库<b>实时读取</b>消费日志，拆分各类 token、按 new-api 计费公式重算金额，导出 Excel。
+  读取按天分批 + 限速，不影响线上业务；数据量大时较慢，任务在后台跑，可离开页面。
+</div>
+
+<!-- ① 选站点 + 账期 -->
+<div class="card">
+  <div style="font-weight:600; margin-bottom:12px">导出条件</div>
+  <form method="get" action="/export" class="row" id="step1">
+    <div>
+      <label>客户站</label>
+      <select name="site_id" id="f_site" required style="min-width:200px" onchange="syncRun()">
+        <option value="">— 请选择 —</option>
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if site_id and s.id == site_id else '' }}>{{ s.id }} - {{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>账期</label>
+      <select name="preset" id="preset" onchange="onPreset(); syncRun()">
+        <option value="last_month" {{ 'selected' if preset=='last_month' }}>上月（月账单）</option>
+        <option value="this_month" {{ 'selected' if preset=='this_month' }}>本月至今</option>
+        <option value="last_week" {{ 'selected' if preset=='last_week' }}>上周（周账单）</option>
+        <option value="this_week" {{ 'selected' if preset=='this_week' }}>本周至今</option>
+        <option value="custom" {{ 'selected' if preset=='custom' }}>指定周期</option>
+      </select>
+    </div>
+    <div id="range" style="display:none">
+      <label>起止日期（含首尾）</label>
+      <div style="display:flex; gap:6px; align-items:center">
+        <input type="date" name="start_date" id="f_start" value="{{ start_date }}" onchange="syncRun()">
+        <span class="muted">~</span>
+        <input type="date" name="end_date" id="f_end" value="{{ end_date }}" onchange="syncRun()">
+      </div>
+    </div>
+    <div>
+      <label>搜索客户（可留空=列出全部）</label>
+      <input name="q" id="f_q" value="{{ q }}" placeholder="用户名 / 备注名 / 用户ID" style="width:200px" onchange="syncRun()">
+    </div>
+    {% if with_daily %}<input type="hidden" name="daily" value="1">{% endif %}
+    {% if with_detail %}<input type="hidden" name="detail" value="1">{% endif %}
+    <input type="hidden" name="search" value="1">
+    <button class="btn" type="submit">搜索客户</button>
+  </form>
+  <div class="muted" style="font-size:12px; margin:10px 0 0">
+    当前账期：<b id="periodhint">{{ title }}</b>
+    <span id="periodwarn" class="err" style="display:none; padding:2px 8px; margin-left:8px">
+      账期已改动，②的客户清单仍是上次搜索的结果（清单与账期无关，可直接生成）
+    </span>
+  </div>
+
+{% if searched %}
+  <hr style="border:none; border-top:1px solid var(--bd); margin:16px 0">
+  <div style="font-weight:600; margin-bottom:4px">
+    客户
+    {% if picked_count %}<span class="tag blue">已选 {{ picked_count }} 个</span>{% endif %}
+    {% if cached %}<span class="muted" style="font-weight:400; font-size:12px">（清单来自 5 分钟内的缓存）</span>{% endif %}
+  </div>
+
+  {% if cust_err %}
+  <div class="err" style="margin-top:10px">搜索失败：{{ cust_err }}</div>
+  {% elif not site_id %}
+  <div class="muted" style="margin-top:10px">请先在上面选择一个客户站。</div>
+  {% elif not customers %}
+  <div class="muted" style="margin-top:10px">
+    {% if q %}没有匹配「{{ q }}」的客户，换个关键词试试（支持用户名 / 备注名 / 用户ID）。
+    {% else %}该站点的用户表里没有客户。{% endif %}
+  </div>
+  {% else %}
+  <div class="row" style="margin:10px 0 8px; align-items:center">
+    <span class="muted" style="font-size:12px">共 {{ customers|length }} 个客户</span>
+    <a href="#" onclick="pickAll(true);return false" style="font-size:12px">全选</a>
+    <a href="#" onclick="pickAll(false);return false" style="font-size:12px">全不选</a>
+  </div>
+  <div style="max-height:300px; overflow-y:auto; border:1px solid var(--bd); border-radius:8px">
+    <table class="compact" id="custtable">
+      <thead><tr><th style="width:50px">选</th><th style="width:90px">用户ID</th><th>用户名</th><th>备注名</th>
+                 <th style="width:250px">导出脚本</th></tr></thead>
+      <tbody>
+        {% for c in customers %}
+        <tr>
+          <td style="text-align:center">
+            <input type="checkbox" class="custpick" value="{{ c.user_id }}"
+                   {{ 'checked' if c.user_id in customer_ids }}>
+          </td>
+          <td>{{ c.user_id }}</td>
+          <td>{{ c.username or '—' }}</td>
+          <td class="muted">{{ c.display_name or '' }}</td>
+          <td>
+            {% if scripts_on %}
+            <form method="post" action="/export/bind" style="display:flex; gap:5px; margin:0"
+                  onsubmit="this.back.value=location.pathname+location.search">
+              <input type="hidden" name="site_id" value="{{ site_id }}">
+              <input type="hidden" name="customer_id" value="{{ c.user_id }}">
+              <input type="hidden" name="back" value="">
+              <select name="script_id" style="flex:1; font-size:12px; padding:3px 6px">
+                <option value="0">默认（{{ site_default.name if site_default else builtin_name }}）</option>
+                {% for sc in all_scripts %}
+                <option value="{{ sc.id }}" {{ 'selected' if c.script_src == '客户绑定' and c.script_id == sc.id }}>{{ sc.name }}</option>
+                {% endfor %}
+              </select>
+              <button class="btn sec" type="submit" style="padding:3px 8px; font-size:12px">绑定</button>
+            </form>
+            <div class="muted" style="font-size:11px; margin-top:3px">
+              当前：{{ c.script_name }}
+              <span class="tag {{ 'blue' if c.script_src == '客户绑定' else '' }}"
+                    style="font-size:10px; padding:0 5px">{{ c.script_src }}</span>
+            </div>
+            {% else %}
+            <span class="muted" style="font-size:12px">{{ c.script_name }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if scripts_on %}
+  <div class="row" style="margin-top:12px; align-items:flex-end; gap:8px">
+    <form method="post" action="/export/bind" class="row" style="gap:8px; align-items:flex-end; margin:0"
+          onsubmit="this.back.value=location.pathname+location.search">
+      <input type="hidden" name="site_id" value="{{ site_id }}">
+      <input type="hidden" name="customer_id" value="0">
+      <input type="hidden" name="back" value="">
+      <div>
+        <label>本站点默认脚本（未单独绑定的客户都用它）</label>
+        <select name="script_id" style="min-width:220px">
+          <option value="0">{{ builtin_name }}</option>
+          {% for sc in all_scripts %}
+          <option value="{{ sc.id }}" {{ 'selected' if site_default and site_default.id == sc.id }}>{{ sc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn sec" type="submit">保存</button>
+    </form>
+    <a class="muted" style="font-size:12px; align-self:center" href="/scripts">管理导出脚本 →</a>
+  </div>
+  {% endif %}
+
+  {% if extra_ids %}
+  <div class="muted" style="font-size:12px; margin-top:8px">
+    另有 {{ extra_ids|length }} 个此前勾选、但不在当前搜索结果里的客户（ID {{ extra_ids|join('、') }}）仍会被导出。
+    <a href="#" onclick="dropExtra();return false">移除它们</a>
+  </div>
+  {% endif %}
+{% endif %}
+</div>
+
+<!-- ③ 生成 -->
+<div class="card">
+  <div style="font-weight:600; margin-bottom:12px">生成账单</div>
+  <form method="post" action="/export/run" id="runform" class="row"
+        onsubmit="return onRun(this)">
+    <input type="hidden" name="site_id" id="h_site" value="{{ site_id or '' }}">
+    <input type="hidden" name="preset" id="h_preset" value="{{ preset }}">
+    <input type="hidden" name="start_date" id="h_start" value="{{ start_date }}">
+    <input type="hidden" name="end_date" id="h_end" value="{{ end_date }}">
+    <input type="hidden" name="q" id="h_q" value="{{ q }}">
+    <input type="hidden" name="currency" id="h_currency" value="{{ currency or 'usd' }}">
+    {% for cid in extra_ids %}<input type="hidden" name="customer_id" value="{{ cid }}" class="extrapick">{% endfor %}
+    <div>
+      <label>计费币种</label>
+      <select name="currency" id="f_currency" onchange="syncRun()">
+        <option value="usd" {{ 'selected' if (currency or 'usd') == 'usd' }}>美元 $</option>
+        <option value="cny" {{ 'selected' if currency == 'cny' }}>人民币 ￥</option>
+      </select>
+    </div>
+    <div>
+      <label>额外 sheet</label>
+      <div style="display:flex; gap:14px; align-items:center; height:35px">
+        <label style="display:flex; gap:5px; align-items:center; margin:0; color:var(--fg)">
+          <input type="checkbox" name="with_daily" {{ 'checked' if with_daily }}> 导出按天明细
+        </label>
+        <label style="display:flex; gap:5px; align-items:center; margin:0; color:var(--fg)">
+          <input type="checkbox" name="with_detail" {{ 'checked' if with_detail }}> 详细明细
+        </label>
+      </div>
+    </div>
+    <button class="btn" type="submit" id="runbtn">生成账单</button>
+    <span class="muted" style="font-size:12px; align-self:center" id="runhint"></span>
+  </form>
+  <div class="muted" style="font-size:12px; margin-top:10px">
+    不勾选任何客户 = 导出该站<b>全部客户</b>。「详细明细」是<b>逐条请求日志</b>，一个月可能几十万行，生成较慢、文件较大。<br>
+    金额按 new-api 计费公式重算；人民币用客户站自己的 <code>USDExchangeRate</code> 折算。某类 token 全为 0 的列不会输出。
+  </div>
+</div>
+
+{% if msg %}
+<div class="card" style="padding:10px 14px"><span class="err">{{ msg }}</span></div>
+{% endif %}
+
+{% if job %}
+<div class="card" style="padding:12px 16px">
+  {% if job.status == 'running' %}
+  <b>后台生成中…</b>
+  {{ job.phase }}{% if job.cur_date %} · {{ job.cur_date }}{% endif %} ·
+  进度 {{ job.days_done }}/{{ job.days_total }} 天 · 已读 <b class="num">{{ '{:,}'.format(job.rows_read) }}</b> 条{% if job.retries %} · <span class="err" style="padding:1px 6px">查询超时重试 {{ job.retries }} 次</span>{% endif %}
+  — 页面每 3 秒自动刷新
+  <form method="post" action="/export/cancel" style="display:inline; margin-left:12px">
+    <input type="hidden" name="job_id" value="{{ job.id }}">
+    <button class="btn sec" type="submit">取消</button>
+  </form>
+  <script>setTimeout(function(){ location.reload(); }, 3000);</script>
+  {% elif job.status == 'done' %}
+  <span class="tag green">生成完成</span>
+  共读取 <b class="num">{{ '{:,}'.format(job.stats.rows_read or 0) }}</b> 条日志，
+  耗时 {{ job.stats.elapsed }} 秒，文件 {{ '%.2f'|format((job.size or 0) / 1048576) }} MB
+  {% if job.stats.skipped_test %}（已排除渠道测试 {{ job.stats.skipped_test }} 条）{% endif %}
+  <a class="btn" style="text-decoration:none; margin-left:12px" download data-noload href="/export/download/{{ job.id }}">下载 xlsx</a>
+  {% if job.stats.truncated %}
+  <span class="err" style="margin-left:8px">注意：{% for k, v in job.stats.truncated.items() %}{{ k }} 超出 Excel 单表上限，已分表 {{ v }} 行{% endfor %}</span>
+  {% endif %}
+  {% if job.stats.kinds %}
+  <div class="muted" style="font-size:12px; margin-top:8px">
+    计费类型分布：
+    {% for name, v in job.stats.kinds.items() %}{{ name }} {{ '{:,}'.format(v.calls) }} 条 / {{ '{:,.4f}'.format(v.amount) }}{% if not loop.last %} · {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+  {% elif job.status == 'cancelled' %}
+  <span class="muted">已取消</span>
+  {% else %}
+  <span class="err">生成失败：{{ job.error }}</span>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <details {{ 'open' if not job }}>
+    <summary style="font-weight:600; padding:4px 0">导出列设置（顺序 / 列名 / 是否导出）</summary>
+    <div class="muted" style="font-size:12px; margin:8px 0 12px">
+      拖动 ☰ 调整顺序；改写「导出列名」即为自定义表头；取消勾选则该列不导出。
+      「日期」只在按天明细与详细明细出现，「时间 / 请求ID」只在详细明细出现。
+    </div>
+    <form method="post" action="/export/columns" id="colform">
+      <input type="hidden" name="col_order" id="col_order">
+      {# 带上当前的站点/账期/搜索/勾选，保存后原样回到这个状态 #}
+      <input type="hidden" name="site_id" id="c_site" value="{{ site_id or '' }}">
+      <input type="hidden" name="preset" id="c_preset" value="{{ preset }}">
+      <input type="hidden" name="start_date" id="c_start" value="{{ start_date }}">
+      <input type="hidden" name="end_date" id="c_end" value="{{ end_date }}">
+      <input type="hidden" name="q" id="c_q" value="{{ q }}">
+      {% if searched %}<input type="hidden" name="search" value="1">{% endif %}
+      {% if with_daily %}<input type="hidden" name="daily" value="1">{% endif %}
+      {% if with_detail %}<input type="hidden" name="detail" value="1">{% endif %}
+      <span id="c_customers"></span>
+      <div style="overflow-x:auto">
+        <table class="compact" style="min-width:680px">
+          <thead>
+            <tr><th style="width:36px"></th><th style="width:60px">导出</th><th>字段</th><th>导出列名</th><th style="width:110px">出现在</th></tr>
+          </thead>
+          <tbody id="colbody">
+            {% for c in columns %}
+            <tr draggable="true" data-key="{{ c.key }}">
+              <td style="cursor:grab; text-align:center; color:var(--muted)">☰</td>
+              <td style="text-align:center"><input type="checkbox" name="vis_{{ c.key }}" {{ 'checked' if c.visible }}></td>
+              <td class="muted">{{ c.label if c.visible else c.label }}<span class="muted" style="font-size:11px"> ({{ c.key }})</span></td>
+              <td><input name="label_{{ c.key }}" value="{{ c.label }}" style="width:100%"></td>
+              <td class="muted" style="font-size:12px">
+                {% if c.scope == 'all' %}全部 sheet{% elif c.scope == 'daily' %}按天/详细{% else %}仅详细{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" type="submit">保存列设置</button>
+        <button class="btn sec" type="submit" formaction="/export/columns/reset">恢复默认</button>
+      </div>
+    </form>
+  </details>
+</div>
+
+<script>
+  function onPreset(){
+    var p = document.getElementById('preset').value;
+    document.getElementById('range').style.display = (p === 'custom') ? '' : 'none';
+  }
+  onPreset();
+
+  // ①的站点/账期/关键词 → ③的隐藏字段。①和③是两个独立 form，
+  // ③原本只带着「上次页面加载时」的值，改了日期不点搜索就会用旧账期生成 —— 这里实时同步。
+  function syncRun(){
+    var pairs = [['f_site','h_site'], ['preset','h_preset'],
+                 ['f_currency','h_currency'],
+                 ['f_start','h_start'], ['f_end','h_end'], ['f_q','h_q']];
+    pairs.forEach(function(p){
+      var src = document.getElementById(p[0]), dst = document.getElementById(p[1]);
+      if(src && dst) dst.value = src.value;
+    });
+    updateHint();
+  }
+
+  // ③按钮旁的提示：站点 + 实际会用的账期 + 已选客户数
+  function updateHint(){
+    var hint = document.getElementById('runhint'), btn = document.getElementById('runbtn');
+    if(!hint) return;
+    var site = (document.getElementById('h_site') || {}).value || '';
+    if(!site){
+      hint.textContent = '请先在上方选择客户站';
+      if(btn) btn.disabled = true;
+      return;
+    }
+    if(btn) btn.disabled = false;
+    var preset = (document.getElementById('h_preset') || {}).value || '';
+    var label = {last_month:'上月', this_month:'本月至今', last_week:'上周',
+                 this_week:'本周至今', custom:''}[preset] || '';
+    var period = label;
+    if(preset === 'custom'){
+      var a = (document.getElementById('h_start') || {}).value || '?';
+      var b = (document.getElementById('h_end') || {}).value || '?';
+      period = a + ' ~ ' + b;
+    }
+    var n = document.querySelectorAll('.custpick:checked').length
+          + document.querySelectorAll('.extrapick').length;
+    hint.textContent = '账期 ' + period + (n ? ' · 已选 ' + n + ' 个客户' : ' · 全部客户');
+
+    // ①的「当前账期」也跟着走，并在账期被改动后提示一下
+    var ph = document.getElementById('periodhint');
+    if(ph){
+      if(ph.dataset.orig === undefined) ph.dataset.orig = ph.textContent.trim();
+      ph.textContent = period;
+      var warn = document.getElementById('periodwarn');
+      if(warn) warn.style.display = (period !== ph.dataset.orig) ? '' : 'none';
+    }
+  }
+
+  // 客户勾选在②的卡片里，提交时同步成③表单里的 hidden input
+  function syncCustomers(form){
+    Array.prototype.forEach.call(form.querySelectorAll('input[name="customer_id"]:not(.extrapick)'),
+      function(el){ el.remove(); });
+    Array.prototype.forEach.call(document.querySelectorAll('.custpick:checked'), function(cb){
+      var h = document.createElement('input');
+      h.type = 'hidden'; h.name = 'customer_id'; h.value = cb.value;
+      form.appendChild(h);
+    });
+  }
+  function onRun(form){
+    syncRun();                     // 提交前再同步一次，防止用键盘改完日期没触发 change
+    if(!form.querySelector('input[name="site_id"]').value){
+      alert('请先在上方选择客户站'); return false;
+    }
+    syncCustomers(form);
+    form.querySelector('button[type=submit]').disabled = true;
+    return true;
+  }
+  function pickAll(on){
+    Array.prototype.forEach.call(document.querySelectorAll('.custpick'), function(cb){ cb.checked = on; });
+    updateHint();
+  }
+  function dropExtra(){
+    Array.prototype.forEach.call(document.querySelectorAll('.extrapick'), function(el){ el.remove(); });
+    updateHint();
+    return false;
+  }
+  document.addEventListener('change', function(e){
+    if(e.target && e.target.classList.contains('custpick')) updateHint();
+  });
+  syncRun();
+
+  // 列顺序拖拽
+  (function(){
+    var body = document.getElementById('colbody');
+    if(!body) return;
+    var dragging = null;
+    body.addEventListener('dragstart', function(e){
+      dragging = e.target.closest('tr'); if(dragging) dragging.style.opacity = '.4';
+    });
+    body.addEventListener('dragend', function(){
+      if(dragging) dragging.style.opacity = ''; dragging = null; sync();
+    });
+    body.addEventListener('dragover', function(e){
+      e.preventDefault();
+      var over = e.target.closest('tr');
+      if(!over || !dragging || over === dragging) return;
+      var r = over.getBoundingClientRect();
+      body.insertBefore(dragging, (e.clientY - r.top) > r.height / 2 ? over.nextSibling : over);
+    });
+    function sync(){
+      document.getElementById('col_order').value =
+        Array.prototype.map.call(body.querySelectorAll('tr'), function(tr){ return tr.dataset.key; }).join(',');
+    }
+    sync();
+    var cf = document.getElementById('colform');
+    if(cf) cf.addEventListener('submit', function(){
+      sync();
+      // 上方的站点/账期/搜索可能刚改过还没提交，取现值；勾选的客户也一并带上，
+      // 否则保存个列设置就把上面选好的都清空了。
+      [['f_site','c_site'],['preset','c_preset'],['f_start','c_start'],
+       ['f_end','c_end'],['f_q','c_q']].forEach(function(p){
+        var a=document.getElementById(p[0]), b=document.getElementById(p[1]);
+        if(a && b) b.value = a.value;
+      });
+      var box = document.getElementById('c_customers');
+      if(box){
+        box.innerHTML = '';
+        document.querySelectorAll('.custpick:checked, .extrapick').forEach(function(el){
+          var h=document.createElement('input');
+          h.type='hidden'; h.name='customer_id'; h.value=el.value;
+          box.appendChild(h);
+        });
+      }
+    });
+  })();
+</script>
+{% endblock %}

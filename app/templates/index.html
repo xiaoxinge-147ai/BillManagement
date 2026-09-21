@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% set nav = 'sites' %}
+{% block body %}
+<h2>站点管理</h2>
+<div class="desc">配置总站/客户站的只读数据库连接（new-api 的数据库）。第 1 步只需配置「总站」。</div>
+
+<div class="card">
+  <h3 style="margin-top:0">新增站点</h3>
+  <form method="post" action="/sites">
+    <div class="row">
+      <div><label>名称</label><input name="name" placeholder="如：总站" required></div>
+      <div><label>类型</label>
+        <select name="site_type">
+          <option value="master">总站</option>
+          <option value="customer">客户站</option>
+        </select>
+      </div>
+      <div><label>数据库类型</label>
+        <select name="dialect">
+          <option value="mysql">mysql</option>
+          <option value="postgresql">postgresql</option>
+          <option value="sqlite">sqlite</option>
+        </select>
+      </div>
+      <div style="flex:1; min-width:320px">
+        <label>只读连接串 DSN</label>
+        <input name="dsn" style="width:100%" placeholder="mysql+pymysql://用户:密码@主机:3306/库名">
+      </div>
+      <button class="btn" type="submit">保存</button>
+    </div>
+  </form>
+  <div class="muted" style="font-size:12px; margin-top:10px">
+    MySQL: <code>mysql+pymysql://用户:密码@主机:3306/库名</code> ·
+    PostgreSQL: <code>postgresql+psycopg://用户:密码@主机:5432/库名</code> ·
+    SQLite: <code>sqlite:////绝对路径/one-api.db</code>
+  </div>
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>数据库</th><th>DSN</th><th>操作</th></tr></thead>
+    <tbody>
+      {% for s in sites %}
+      <tr>
+        <td>{{ s.id }}</td>
+        <td>{{ s.name }}</td>
+        <td><span class="tag {{ 'blue' if s.site_type=='master' else 'green' }}">{{ '总站' if s.site_type=='master' else '客户站' }}</span></td>
+        <td>{{ s.dialect }}</td>
+        <td class="muted" style="max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap" title="密码已隐藏">
+          {% if s.dsn %}<span class="tag green">已配置</span> <span style="font-size:12px">{{ masked[s.id] }}</span>{% else %}<span class="tag" style="background:#fee2e2;color:#991b1b">未配置</span>{% endif %}
+        </td>
+        <td>
+          <a class="btn sec" href="/sites/{{ s.id }}/test">测试连接</a>
+          <a class="btn sec" href="/usage?site_id={{ s.id }}">看消耗</a>
+          <form method="post" action="/sites/{{ s.id }}/delete" style="display:inline" onsubmit="return confirm('删除该站点？')">
+            <button class="btn danger" type="submit">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center; padding:24px">还没有站点，先在上面新增一个总站。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

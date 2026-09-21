@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% set nav = 'report' %}
+{% block body %}
+<h2>周 / 月报表</h2>
+<div class="desc">按时间区间汇总各客户的营收、成本、利润（逐日读取已保存数据汇总）。用于一周/一月统计或任意区间核对。</div>
+
+<div class="card">
+  <form method="get" action="/report" class="row">
+    <div>
+      <label>客户站（单选/多选，不选=全部）</label>
+      <select name="site_id" multiple size="{{ [sites|length + 1, 6]|min }}" style="min-width:180px">
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if s.id in site_ids else '' }}>{{ s.id }} - {{ s.name }}</option>
+        {% endfor %}
+      </select>
+      <div class="muted" style="font-size:12px; margin-top:4px">按住 Ctrl/⌘ 可多选；不选则统计全部客户站。</div>
+    </div>
+    <div><label>开始日期</label><input type="date" name="start_date" value="{{ start_date }}"></div>
+    <div><label>结束日期</label><input type="date" name="end_date" value="{{ end_date }}"></div>
+    <button class="btn" type="submit">查询</button>
+  </form>
+</div>
+
+<div class="card">
+  <div style="margin-bottom:10px">
+    {{ start_date }} ~ {{ end_date }} ·
+    营收 <b class="num">{{ '{:,.4f}'.format(tot_rev) }}</b> ·
+    成本 <b class="num">{{ '{:,.4f}'.format(tot_cost) }}</b> ·
+    利润 <b class="num" style="color:{{ 'var(--pri)' if tot_profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(tot_profit) }}</b>
+    {% if tot_margin is not none %}(<b>{{ '{:,.2f}'.format(tot_margin) }}%</b>){% endif %}
+  </div>
+  <div style="overflow-x:auto">
+  <table class="compact" style="min-width:760px">
+    <thead><tr><th>客户站</th><th>客户ID</th><th>客户</th><th style="text-align:right">营收</th><th style="text-align:right">成本</th><th style="text-align:right">利润</th><th style="text-align:right">利润%</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="muted">{{ r.site_name }}</td>
+        <td>{{ r.customer_id }}</td>
+        <td>{{ r.username }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.revenue) }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.cost) }}</td>
+        <td class="num" style="text-align:right; color:{{ 'inherit' if r.profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(r.profit) }}</td>
+        <td class="num" style="text-align:right">{% if r.margin is not none %}{{ '{:,.2f}'.format(r.margin) }}%{% else %}—{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="muted" style="text-align:center; padding:24px">该区间无数据（请确认这些日期已保存快照并对账）。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

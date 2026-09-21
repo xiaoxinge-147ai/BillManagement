@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% set nav = 'me' %}
+{% block body %}
+{% set C = ctx(request) %}
+<h2>修改密码</h2>
+<div class="desc">修改后当前登录会立即失效，需要用新密码重新登录。</div>
+
+{% if msg %}<div class="card" style="padding:10px 14px"><span class="tag green">{{ msg }}</span></div>{% endif %}
+{% if err %}<div class="card" style="padding:10px 14px"><span class="err">{{ err }}</span></div>{% endif %}
+
+<div class="card" style="max-width:420px">
+  <div style="margin-bottom:14px">
+    <div style="font-weight:600">{{ C.user.display_name or C.user.username }}</div>
+    <div class="muted" style="font-size:12px; margin-top:2px">
+      {{ '超级管理员' if C.is_admin else '运营账号' }} · {{ C.user.username }}
+    </div>
+  </div>
+  <form method="post" action="/me/password">
+    <div style="margin-bottom:12px"><label>原密码</label>
+      <input name="old" type="password" required style="width:100%"></div>
+    <div style="margin-bottom:16px"><label>新密码（≥6 位）</label>
+      <input name="new" type="password" required minlength="6" style="width:100%"></div>
+    <button class="btn" type="submit">保存</button>
+  </form>
+</div>
+
+{% if not C.is_admin %}
+<div class="card" style="max-width:420px">
+  <div style="font-weight:600; margin-bottom:10px">我的权限</div>
+  <div class="muted" style="font-size:12.5px">
+    可访问模块：{% for m in C.modules %}{{ module_name(m) }}{% if not loop.last %} · {% endif %}{% else %}无{% endfor %}
+  </div>
+  <div class="muted" style="font-size:12.5px; margin-top:6px">
+    可访问客户站：{{ C.user.site_ids or '不限' }}
+  </div>
+  <div class="muted" style="font-size:12px; margin-top:10px">需要开通更多权限请联系管理员。</div>
+</div>
+{% endif %}
+{% endblock %}

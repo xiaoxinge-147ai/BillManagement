@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% set nav = 'recon' %}
+{% block body %}
+<h2>对账（按 sk）</h2>
+<div class="desc">
+  把<b>理论成本</b>（来自「渠道成本」）按 <b>sk</b> 合并（同一 sk 多渠道合计），与<b>供应商实际成本</b>对账。
+  实际成本 = 平台用量 × 充值倍率。平台用量可「从上游读取」(用 sk 查上游) 或手动录入；充值倍率可手动调整。
+  颜色：绿(&lt;{{ '%g'|format(g) }}%) / 黄(&lt;{{ '%g'|format(a) }}%) / 红(≥{{ '%g'|format(a) }}%)。
+</div>
+
+<div class="card">
+  <div class="row">
+    <form method="get" action="/recon" class="row" style="margin:0">
+      <div>
+        <label>站点</label>
+        <select name="site_id">
+          {% for s in sites %}
+          <option value="{{ s.id }}" {{ 'selected' if site and s.id==site.id else '' }}>{{ s.id }} - {{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn" type="submit">查询</button>
+    </form>
+    <form method="post" action="/run-prepare" style="margin:0" onsubmit="this.querySelector('button').disabled=true">
+      <input type="hidden" name="d" value="{{ d }}">
+      <label>&nbsp;</label>
+      <button class="btn" type="submit" title="保存所有站点当天快照 + 后台读取所有总站上游用量">一键准备当天</button>
+    </form>
+    {% if site_id %}
+    <form method="post" action="/recon/refresh-meta" style="margin:0">
+      <input type="hidden" name="site_id" value="{{ site_id }}">
+      <input type="hidden" name="d" value="{{ d }}">
+      <label>&nbsp;</label>
+      <button class="btn sec" type="submit" title="从源库重新读取渠道的 sk / 上游地址">刷新渠道信息</button>
+    </form>
+    {% endif %}
+    {% if has_snapshot %}
+    <form method="post" action="/recon/fetch-all" style="margin:0" onsubmit="this.querySelector('button').disabled=true">
+      <input type="hidden" name="site_id" value="{{ site_id }}">
+      <input type="hidden" name="d" value="{{ d }}">
+      <label>&nbsp;</label>
+      <button class="btn" type="submit">全部从上游读取</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if msg %}
+<div class="card" style="padding:10px 14px">
+  <span class="{{ 'tag green' if '成功' in msg and '失败 0' in msg or msg.startswith('读取成功') else '' }}">{{ msg }}</span>
+</div>
+{% endif %}
+
+{% if fetch_prog %}
+<div class="card" style="padding:10px 14px" id="fetchprog">
+  {% if fetch_prog.status == 'running' %}
+  <b>后台读取中…</b> 进度 {{ fetch_prog.done }}/{{ fetch_prog.total }}（成功 {{ fetch_prog.ok }}，失败 {{ fetch_prog.fail }}）— 页面每 3 秒自动刷新
+  <script>setTimeout(function(){ var u=new URL(location.href); u.searchParams.delete('msg'); location.replace(u.toString()); }, 3000);</script>
+  {% elif fetch_prog.status == 'done' %}
+  <span class="tag green">读取完成</span> 成功 {{ fetch_prog.ok }}，失败 {{ fetch_prog.fail }}{% if fetch_prog.errors %}（{{ fetch_prog.errors[:3] | join('；') }}{% if fetch_prog.errors|length > 3 %} …{% endif %}）{% endif %}
+  {% else %}
+  <span class="err">读取出错：{{ fetch_prog.errors | join('；') }}</span>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if not has_snapshot %}
+<div class="card muted">该日（{{ d }}）还没有保存快照。请先到「渠道消耗」保存当天，并在「渠道成本」设好倍率/单价。</div>
+{% else %}
+<div class="card">
+  <div style="margin-bottom:12px">
+    {{ site.name }} · {{ d }} ·
+    理论合计 <b class="num">{{ '{:,.4f}'.format(tot_theo) }}</b> ·
+    实际合计 <b class="num">{{ '{:,.4f}'.format(tot_act) }}</b> ·
+    差异 <b class="num">{{ '{:,.4f}'.format(tot_diff) }}</b>
+    {% if tot_pct is not none %}(<b>{{ '{:,.2f}'.format(tot_pct) }}%</b>){% endif %}
+  </div>
+  <div style="overflow-x:auto">
+  <table class="compact" style="min-width:900px">
+    <thead>
+      <tr>
+        <th>sk</th><th>渠道</th>
+        <th style="text-align:right">理论成本</th>
+        <th>平台用量</th><th>充值倍率</th>
+        <th style="text-align:right">实际成本</th>
+        <th style="text-align:right">差异额</th>
+        <th style="text-align:right">差异%</th>
+        <th>上游</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td title="{{ r.base_url }}">{{ r.sk_mask }}{% if r.source %}<br><span class="muted" style="font-size:11px">{{ '上游' if r.source=='upstream' else '手填' }}</span>{% endif %}</td>
+        <td title="{{ r.channels }}（点击打开上游登录站点）" style="max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">
+          {% if r.login_url or r.base_url %}
+          <a href="{{ r.login_url or r.base_url }}" target="_blank" rel="noopener" style="color:var(--pri); text-decoration:none">{{ r.channels }}</a>
+          {% else %}<span class="muted">{{ r.channels }}</span>{% endif %}
+        </td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.theoretical) }}</td>
+        <td>
+          {% if r.sk %}
+          <form method="post" action="/recon/usage" style="display:flex; gap:4px; margin:0">
+            <input type="hidden" name="site_id" value="{{ site_id }}"><input type="hidden" name="sk" value="{{ r.sk }}"><input type="hidden" name="d" value="{{ d }}">
+            <input name="platform_usage" type="number" step="0.0001" value="{{ '%.4f'|format(r.usage) }}" style="width:88px">
+            <button class="btn sec" type="submit" title="保存平台用量">✓</button>
+          </form>
+          {% else %}<span class="muted">无 sk</span>{% endif %}
+        </td>
+        <td>
+          {% if r.sk %}
+          <form method="post" action="/recon/recharge" style="display:flex; gap:4px; margin:0">
+            <input type="hidden" name="site_id" value="{{ site_id }}"><input type="hidden" name="sk" value="{{ r.sk }}"><input type="hidden" name="d" value="{{ d }}">
+            <input name="recharge_ratio" type="number" step="0.0001" value="{{ '%.4f'|format(r.ratio) }}" style="width:80px">
+            <button class="btn sec" type="submit" title="保存充值倍率">✓</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.actual) }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.diff) }}</td>
+        <td class="num diff-{{ r.color }}" style="text-align:right">
+          {% if r.pct is not none %}{{ '{:,.2f}'.format(r.pct) }}%
+          {% elif not r.has_actual %}未录入{% else %}—{% endif %}
+        </td>
+        <td>
+          {% if r.can_fetch %}
+          <div style="display:flex; gap:4px; align-items:center">
+            <form method="post" action="/recon/fetch" style="margin:0" onsubmit="this.querySelector('button').disabled=true">
+              <input type="hidden" name="site_id" value="{{ site_id }}"><input type="hidden" name="sk" value="{{ r.sk }}"><input type="hidden" name="base_url" value="{{ r.base_url }}"><input type="hidden" name="d" value="{{ d }}">
+              <button class="btn sec" type="submit">读取</button>
+            </form>
+            <a class="muted" style="font-size:12px" target="_blank" href="/recon/debug?site_id={{ site_id }}&sk={{ r.sk|urlencode }}&d={{ d }}">调试</a>
+          </div>
+          {% else %}<span class="muted" style="font-size:12px">不可读</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="muted" style="font-size:12px; margin-top:10px">提示：「读取」会用「供应商账号」里的账密登录上游、按当天日期汇总该 sk 的消耗；拿不到就手填平台用量。实际成本 = 平台用量 × 充值倍率。</div>
+</div>
+{% endif %}
+{% endblock %}

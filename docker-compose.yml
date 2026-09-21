@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-bill}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bill}
+      POSTGRES_DB: ${POSTGRES_DB:-bill}
+      TZ: ${TIMEZONE:-Asia/Shanghai}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bill} -d ${POSTGRES_DB:-bill}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-bill}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-bill}
+      DB_NAME: ${POSTGRES_DB:-bill}
+      TIMEZONE: ${TIMEZONE:-Asia/Shanghai}
+      APP_PASSWORD: ${APP_PASSWORD:-}
+      CRYPTO_SECRET: ${CRYPTO_SECRET:-}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+
+volumes:
+  pgdata:

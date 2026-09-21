@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+data/
+*.db
+*.sqlite3
+.env
+.DS_Store
+
+# 本地工具配置（含 .claude/settings.local.json —— 里面有 API key，绝不能提交）
+.claude/
+
+# 与项目无关的归档：对账产物、newapi 脚本、astra/评测等，见 _archive/README.md
+_archive/

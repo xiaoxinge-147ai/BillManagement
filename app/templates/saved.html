@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set nav = 'saved' %}
+{% block body %}
+<h2>保存记录</h2>
+<div class="desc">
+  这里列出**已经保存到本系统数据库的每日快照**（哪些日期、哪些站点的数据已抓取入库）。
+  在「渠道消耗」「客户利润」页查询会自动保存，每天凌晨也会自动保存。系统后续的成本/对账/利润都基于这些已保存数据计算，不再实时查源库。
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>日期</th><th>站点</th><th>类型</th><th style="text-align:right">明细条数</th><th style="text-align:right">合计消耗(平台单位)</th><th style="text-align:right">合计调用</th></tr></thead>
+    <tbody>
+      {% for r in data %}
+      <tr>
+        <td>{{ r.stat_date }}</td>
+        <td>{{ r.site_name }}</td>
+        <td><span class="tag {{ 'blue' if r.kind=='总站渠道' else 'green' }}">{{ r.kind }}</span></td>
+        <td class="num" style="text-align:right">{{ r.n }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(r.units) }}</td>
+        <td class="num" style="text-align:right">{{ '{:,}'.format(r.calls) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted" style="text-align:center; padding:24px">还没有保存的快照。去「渠道消耗」或「客户利润」页查询一次即会自动保存。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

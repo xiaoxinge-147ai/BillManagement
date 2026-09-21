@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% set nav = 'customers' %}
+{% block body %}
+<h2>客户利润</h2>
+<div class="desc">
+  客户站渠道 sk = 总站令牌。把令牌成本按各客户在该分组的消耗占比摊到客户；营收=客户当天实际扣除额度(平台单位)；利润=营收−成本。
+  默认读取本地已保存快照（切 tab / 选日期很快）；点「查询并保存」才回客户站重新拉取当天数据。依赖：总站当天令牌成本已算好（已对账）。
+</div>
+
+<div class="card" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+  <form method="get" action="/customers" class="row" style="margin:0">
+    <input type="hidden" name="refresh" value="1">
+    <div>
+      <label>客户站</label>
+      <select name="site_id">
+        {% for s in sites %}
+        <option value="{{ s.id }}" {{ 'selected' if site and s.id==site.id else '' }}>{{ s.id }} - {{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">查询并保存（重新拉取）</button>
+  </form>
+  {% if site %}
+  <a class="btn sec" style="align-self:flex-end" target="_blank" href="/customers/debug?site_id={{ site_id }}&d={{ d }}">调试映射</a>
+  <label style="align-self:flex-end; display:flex; align-items:center; gap:6px; margin:0; cursor:pointer">
+    <input type="checkbox" id="toggleBilling" onchange="toggleBilling(this.checked)" style="width:auto"> 显示计费过程
+  </label>
+  {% endif %}
+</div>
+
+<details class="card">
+  <summary style="cursor:pointer; font-size:13px; font-weight:600">按次模型设置（全局，所有客户站公用）</summary>
+  <div class="desc" style="margin:8px 0">
+    默认所有模型「按量」计费（按消耗占比分摊成本）。在此标记为「按次」的模型，将改为按调用次数占比分摊。分组倍率由系统自动读取 new-api，无需配置。
+  </div>
+  <form method="post" action="/customers/billmode" class="row" style="margin-bottom:10px" onsubmit="this.querySelector('button').disabled=true">
+    <input type="hidden" name="site_id" value="{{ site_id }}">
+    <input type="hidden" name="d" value="{{ d }}">
+    <div><label>模型名</label><input name="model_name" placeholder="如 sora" required></div>
+    <button class="btn" type="submit">标记为按次</button>
+  </form>
+  {% if billmodes %}
+  <table class="compact">
+    <thead><tr><th>模型</th><th>计费</th><th style="width:80px">操作</th></tr></thead>
+    <tbody>
+      {% for b in billmodes %}
+      <tr>
+        <td>{{ b.model_name }}</td>
+        <td><span class="tag" style="background:#fff7ed;color:#c2410c">按次</span></td>
+        <td>
+          <form method="post" action="/customers/billmode/delete" style="margin:0" onsubmit="this.querySelector('button').disabled=true">
+            <input type="hidden" name="rid" value="{{ b.id }}">
+            <input type="hidden" name="site_id" value="{{ site_id }}">
+            <input type="hidden" name="d" value="{{ d }}">
+            <button class="btn danger" type="submit" style="padding:4px 10px; font-size:12px">删除</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="muted" style="font-size:12px">未标记（全部按量）。</div>
+  {% endif %}
+</details>
+
+{% if not sites %}
+<div class="card muted">还没有"客户站"类型的站点。请到「站点」页新增类型为"客户站"的站点。</div>
+{% elif not has_data %}
+<div class="card muted">该日（{{ d }}）没有客户站消耗数据（查询时会自动从客户站拉取并保存；若仍为空，可能是该日无消耗或连接未配置）。{{ error or '' }}</div>
+{% else %}
+<div class="card">
+  <div style="margin-bottom:10px">
+    {{ site.name }} · {{ d }} ·
+    成本 <b class="num">{{ '{:,.4f}'.format(tot_cost) }}</b> ·
+    营收 <b class="num">{{ '{:,.4f}'.format(tot_rev) }}</b> ·
+    利润 <b class="num" style="color:{{ 'var(--pri)' if tot_profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(tot_profit) }}</b>
+    {% if tot_margin is not none %}(<b>{{ '{:,.2f}'.format(tot_margin) }}%</b>){% endif %}
+  </div>
+  <b style="font-size:13px">分组汇总</b>
+  <table style="margin-top:6px">
+    <thead><tr><th>分组</th><th>总站令牌</th><th style="text-align:right">成本</th><th style="text-align:right">营收</th><th style="text-align:right">利润</th><th style="text-align:right">利润%</th></tr></thead>
+    <tbody>
+      {% for g in groups %}
+      <tr>
+        <td><span class="tag blue">{{ g.group_name }}</span></td>
+        <td class="muted">{{ g.token or '—' }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(g.cost) }}</td>
+        <td class="num" style="text-align:right">{{ '{:,.4f}'.format(g.rev) }}</td>
+        <td class="num" style="text-align:right; color:{{ 'inherit' if g.profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(g.profit) }}</td>
+        <td class="num" style="text-align:right">{% if g.margin is not none %}{{ '{:,.2f}'.format(g.margin) }}%{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <b style="font-size:13px">客户明细（点客户展开看各分组）</b>
+  <div style="margin-top:8px">
+    <div class="crow chead">
+      <span>客户</span><span class="r">营收(消耗)</span><span class="r">成本</span><span class="r">利润</span><span class="r">利润%</span>
+    </div>
+    {% for c in customers %}
+    <details>
+      <summary class="crow">
+        <span>{{ c.username }} <span class="muted" style="font-size:11px">#{{ c.customer_id }}</span></span>
+        <span class="r num">{{ '{:,.4f}'.format(c.revenue) }}</span>
+        <span class="r num">{{ '{:,.4f}'.format(c.cost) }}</span>
+        <span class="r num" style="color:{{ 'inherit' if c.profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(c.profit) }}</span>
+        <span class="r num">{% if c.margin is not none %}{{ '{:,.2f}'.format(c.margin) }}%{% else %}—{% endif %}</span>
+      </summary>
+      <table class="compact" style="margin:6px 0 14px">
+        <thead><tr><th>分组</th><th>总站令牌</th><th style="text-align:right">营收(消耗)</th><th style="text-align:right">成本</th><th style="text-align:right">利润</th><th style="text-align:right">利润%</th></tr></thead>
+        <tbody>
+          {% for g in c.groups %}
+          <tr>
+            <td>{{ g.group_name }}{% if not g.mapped %} <span class="tag" style="background:#fee2e2;color:#991b1b" title="该分组渠道未匹配到总站令牌，成本按0">未映射</span>{% endif %}</td>
+            <td class="muted" style="font-size:12px">{{ g.token_name or '—' }}</td>
+            <td class="num" style="text-align:right">{{ '{:,.4f}'.format(g.revenue) }}</td>
+            <td class="num" style="text-align:right">{{ '{:,.4f}'.format(g.cost) }}</td>
+            <td class="num" style="text-align:right; color:{{ 'inherit' if g.profit>=0 else '#dc2626' }}">{{ '{:,.4f}'.format(g.profit) }}</td>
+            <td class="num" style="text-align:right">{% if g.margin is not none %}{{ '{:,.2f}'.format(g.margin) }}%{% else %}—{% endif %}</td>
+          </tr>
+          {% if g.models %}
+          <tr class="billing-detail"><td colspan="6" style="padding:0 0 0 18px; background:#fcfcfd">
+            <table class="compact" style="margin:4px 0">
+              <thead><tr>
+                <th>模型</th><th>计费</th><th>度量</th>
+                <th style="text-align:right">客户度量</th><th style="text-align:right">合计度量</th>
+                <th style="text-align:right">占比</th><th style="text-align:right">该模型令牌总成本</th><th style="text-align:right">分摊成本</th>
+              </tr></thead>
+              <tbody>
+                {% for mo in g.models %}
+                <tr>
+                  <td>{{ mo.model }}</td>
+                  <td>{% if mo.mode=='per_call' %}<span class="tag" style="background:#fff7ed;color:#c2410c">按次</span>{% else %}<span class="tag blue">按量</span>{% endif %}</td>
+                  <td class="muted">{{ mo.metric_name }}</td>
+                  {% if mo.mode=='per_call' %}
+                  <td class="num" style="text-align:right">{{ '{:,}'.format(mo.cust_metric|int) }}</td>
+                  <td class="num" style="text-align:right">{{ '{:,}'.format(mo.total_metric|int) }}</td>
+                  {% else %}
+                  <td class="num" style="text-align:right">{{ '{:,.4f}'.format(mo.cust_metric) }}</td>
+                  <td class="num" style="text-align:right">{{ '{:,.4f}'.format(mo.total_metric) }}</td>
+                  {% endif %}
+                  <td class="num" style="text-align:right">{% if mo.share is not none %}{{ '{:,.2f}'.format(mo.share*100) }}%{% else %}—{% endif %}</td>
+                  <td class="num" style="text-align:right">{{ '{:,.4f}'.format(mo.model_cost) }}</td>
+                  <td class="num" style="text-align:right"><b>{{ '{:,.4f}'.format(mo.cost) }}</b></td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <div class="muted" style="font-size:11px; padding:2px 0 8px">分摊成本 = 该模型令牌总成本 × 占比；占比 = 客户度量 ÷ 合计度量（按量用消耗、按次用调用次数）。</div>
+          </td></tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<style>
+  /* 计费过程明细默认隐藏，勾选「显示计费过程」后显示 */
+  tr.billing-detail { display:none; }
+  body.show-billing tr.billing-detail { display:table-row; }
+</style>
+<script>
+  function toggleBilling(on){
+    document.body.classList.toggle('show-billing', !!on);
+    try{ localStorage.setItem('showBilling', on ? '1':'0'); }catch(e){}
+  }
+  (function(){
+    var on = false;
+    try{ on = localStorage.getItem('showBilling')==='1'; }catch(e){}
+    var cb = document.getElementById('toggleBilling');
+    if(cb){ cb.checked = on; }
+    document.body.classList.toggle('show-billing', on);
+  })();
+</script>
+{% endblock %}

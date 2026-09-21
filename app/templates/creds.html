@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% set nav = 'creds' %}
+{% block body %}
+<h2>供应商访问令牌</h2>
+<div class="desc">
+  从供应商侧的 new-api 后台「<b>个人设置 → 生成系统访问令牌</b>」拿到令牌，填到这里即可读取用量。
+  设一个<b>默认令牌</b>供所有上游通用；个别上游属于不同账号的，对该上游<b>单独覆盖</b>。
+</div>
+
+<div class="card" style="border-color:#bfdbfe; background:#f8fbff">
+  <div style="font-weight:600; margin-bottom:6px">为什么不再用账号密码</div>
+  <div class="muted" style="font-size:12.5px; line-height:1.7">
+    新版 new-api 的令牌列表接口（<code>GET /api/token/</code>）会把 key 脱敏输出，
+    原先「登录后按 key 尾部后缀反猜令牌名」的做法已经失效 —— 这就是部分上游读不到用量的原因。<br>
+    现在改为用访问令牌调 <code>/api/token/search?token=&lt;完整sk&gt;</code> <b>精确反查</b>令牌名，
+    再用 <code>/api/log/self/stat</code> 取指定日期的用量，不受脱敏影响。<br>
+    注意：访问令牌要与渠道里配置的 sk <b>属于同一个上游账号</b>，否则查不到对应令牌。<br>
+    旧版 new-api（0.6~0.9）的接口还要求带用户ID。<b>填上「用户ID」可跳过自动探测、直连更快</b>；
+    不填则系统自动探测。用户ID 就是上游「个人设置」里显示的那个 ID。
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">默认访问令牌</h3>
+  <form method="post" action="/creds/default" class="row">
+    <div style="flex:1; min-width:320px">
+      <label>访问令牌（PAT）</label>
+      <input name="access_token" type="password" style="width:100%"
+             placeholder="{{ '已设置 ' + default.token_tail + '（留空不改）' if default.has_token else '粘贴上游的系统访问令牌' }}">
+    </div>
+    <div><label>用户ID（选填）</label>
+      <input name="user_id" value="{{ default.user_id or '' }}" placeholder="填了免探测，更快"
+             style="width:130px" inputmode="numeric"></div>
+    <div><label>备注</label><input name="note" value="{{ default.note or '' }}" placeholder="如：主账号" style="width:130px"></div>
+    <button class="btn" type="submit">保存默认</button>
+  </form>
+  <div class="muted" style="font-size:12px; margin-top:8px">
+    当前：{% if default.has_token %}<span class="tag green">已设置</span> {{ default.token_tail }}
+    {% else %}<span class="tag" style="background:#fef3c7;color:#92400e">未设置</span>{% endif %}
+    {% if default.note %} · {{ default.note }}{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="row" style="justify-content:space-between; align-items:center">
+    <h3 style="margin:0">各上游（按 base_url）</h3>
+    <form method="post" action="/creds/test-all" style="margin:0" onsubmit="this.querySelector('button').disabled=true">
+      <button class="btn" type="submit">测试全部令牌</button>
+    </form>
+  </div>
+  <div class="muted" style="font-size:12px; margin:6px 0 12px">
+    接口地址留空 = 自动用上游地址的根（去掉 /codex 等中转子路径）。查令牌与查用量都走这个地址。
+  </div>
+  <div style="overflow-x:auto">
+  <table class="compact" style="min-width:960px">
+    <thead><tr>
+      <th>上游地址(中转)</th><th style="width:80px">令牌状态</th><th style="width:120px">使用的令牌</th>
+      <th style="width:180px">接口地址(留空=自动)</th><th style="width:150px">单独令牌</th>
+      <th style="width:90px">用户ID</th><th style="width:90px">备注</th><th style="width:160px">操作</th>
+    </tr></thead>
+    <tbody>
+      {% for u in upstreams %}
+      <tr>
+        <td title="{{ u.base_url }}" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ u.base_url }}</td>
+        <td>
+          {% if u.status_ok is none %}<span class="tag" style="background:#f1f5f9;color:#64748b">未测试</span>
+          {% elif u.status_ok %}<span class="tag green" title="{{ u.status_msg }}">可用</span>
+          {% else %}<span class="tag" style="background:#fee2e2;color:#991b1b" title="{{ u.status_msg }}">失败</span>{% endif %}
+        </td>
+        <td>
+          {% if u.acct_state == 'override' %}<span class="tag blue">单独</span>
+          {% elif u.acct_state == 'default' %}<span class="muted" style="font-size:11.5px">默认令牌</span>
+          {% else %}<span class="tag" style="background:#fef3c7;color:#92400e">未配置</span>{% endif %}
+          {% if u.username %}<div class="muted" style="font-size:11px">{{ u.username }}</div>{% endif %}
+        </td>
+        <td><input name="login_url" value="{{ u.login_url }}" placeholder="{{ u.auto_login_url }}"
+                   style="width:200px" form="f-{{ loop.index }}"></td>
+        <td><input name="access_token" type="password" placeholder="留空 = 用默认令牌"
+                   style="width:140px" form="f-{{ loop.index }}"></td>
+        <td><input name="user_id" value="{{ u.user_id or '' }}" placeholder="选填"
+                   style="width:70px" inputmode="numeric" form="f-{{ loop.index }}"></td>
+        <td><input name="note" placeholder="备注" style="width:80px" form="f-{{ loop.index }}"></td>
+        <td style="white-space:nowrap">
+          <form id="f-{{ loop.index }}" method="post" action="/creds/upstream" style="display:inline; margin:0">
+            <input type="hidden" name="base_url" value="{{ u.base_url }}">
+            <button class="btn sec" type="submit">保存</button>
+          </form>
+          <form method="post" action="/creds/test" style="display:inline; margin:0">
+            <input type="hidden" name="base_url" value="{{ u.base_url }}">
+            <button class="btn sec" type="submit">测试</button>
+          </form>
+          {% if u.acct_state == 'override' %}
+          <form method="post" action="/creds/upstream" style="display:inline; margin:0"
+                onsubmit="return confirm('清除该上游的单独令牌，回落到默认令牌？')">
+            <input type="hidden" name="base_url" value="{{ u.base_url }}">
+            <input type="hidden" name="clear" value="1">
+            <button class="btn danger" type="submit">清除</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted" style="text-align:center; padding:24px">还没有上游。请先在「对账」页点「刷新渠道信息」。</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

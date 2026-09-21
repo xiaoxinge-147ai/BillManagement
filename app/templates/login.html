@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 - 账单系统</title>
+  <style>
+    :root{ --pri:#2563eb; --bd:#e2e8f0; --fg:#0f172a; --muted:#64748b; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+          font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+          color:var(--fg); background:#0f172a;
+          background-image:radial-gradient(1000px 500px at 50% -10%, #1e293b 0%, #0f172a 60%); }
+    .box{ background:#fff; border-radius:14px; padding:30px 30px 26px; width:340px;
+          box-shadow:0 20px 50px rgba(0,0,0,.35); }
+    .brand{ display:flex; align-items:center; gap:11px; margin-bottom:22px; }
+    .mark{ width:36px; height:36px; border-radius:9px; background:var(--pri); color:#fff;
+           display:flex; align-items:center; justify-content:center; font-weight:700; font-size:13px; }
+    .t1{ font-weight:650; font-size:16px; }
+    .t2{ color:var(--muted); font-size:11.5px; margin-top:2px; }
+    label{ display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px; font-weight:500; }
+    input{ width:100%; padding:9px 12px; border:1px solid var(--bd); border-radius:8px;
+           font-size:14px; font-family:inherit; transition:border-color .12s, box-shadow .12s; }
+    input:focus{ outline:none; border-color:var(--pri); box-shadow:0 0 0 3px rgba(37,99,235,.12); }
+    button{ width:100%; margin-top:16px; background:var(--pri); color:#fff; border:none; padding:10px;
+            border-radius:8px; font-size:14.5px; font-weight:500; cursor:pointer; font-family:inherit; }
+    button:hover{ filter:brightness(1.08); }
+    .err{ background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; padding:8px 12px;
+          border-radius:8px; font-size:13px; margin-bottom:14px; }
+    .ok{ background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; padding:8px 12px;
+         border-radius:8px; font-size:13px; margin-bottom:14px; }
+  </style>
+</head>
+<body>
+  <form class="box" method="post" action="/login">
+    <div class="brand">
+      <div class="mark">147</div>
+      <div>
+        <div class="t1">账单系统</div>
+        <div class="t2">Billing / Recon / Export</div>
+      </div>
+    </div>
+    {% if err %}<div class="err">用户名或密码错误</div>{% endif %}
+    {% if request.query_params.get('msg') %}
+      <div class="ok">{{ request.query_params.get('msg') }}</div>{% endif %}
+    <input type="hidden" name="next" value="{{ next or '/' }}">
+    <label for="u">用户名</label>
+    <input id="u" name="username" autofocus autocomplete="username">
+    <label for="pw" style="margin-top:12px">密码</label>
+    <input id="pw" type="password" name="password" autocomplete="current-password">
+    <button type="submit">登录</button>
+  </form>
+</body>
+</html>
